@@ -137,6 +137,11 @@ export class ChromeClient {
     // Auto-dismiss "Leave site?" / beforeunload dialogs
     this.setupDialogHandler(this.client);
 
+    // Prevent Chrome from stealing focus when we attach
+    try {
+      await this.client.Runtime.evaluate({ expression: "window.blur();" });
+    } catch {}
+
     this.currentTab = tab;
     return `Attached to: "${tab.title}" (${tab.url})`;
   }
@@ -253,9 +258,12 @@ export class ChromeClient {
     } catch {
       // Timeout or error is OK, page might be slow — we proceed anyway
     }
-    // Update tab info
+    // Update tab info and blur window to prevent focus stealing
     const result = await client.Runtime.evaluate({
-      expression: "JSON.stringify({ title: document.title, url: window.location.href })",
+      expression: `
+        window.blur();
+        JSON.stringify({ title: document.title, url: window.location.href })
+      `,
     });
     if (result.result.value) {
       const info = JSON.parse(result.result.value);
@@ -398,6 +406,7 @@ export class ChromeClient {
           // Scroll into view and click
           el.scrollIntoView({ behavior: 'instant', block: 'center' });
           el.click();
+          window.blur(); // Prevent Chrome from stealing focus
           return 'Clicked: ' + (el.tagName || '') + ' "' + (el.textContent || '').trim().slice(0, 80) + '"';
         })()
       `,

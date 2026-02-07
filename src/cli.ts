@@ -120,6 +120,8 @@ export class CLI {
   private lastUserMessage = "";
   private completedActions: string[] = [];
   private lastResponseHadText = false;
+  private currentTaskLabel = "";
+  private taskStepCount = 0;
   private static readonly COMPACT_THRESHOLD = 12;
 
   constructor(sessionId?: string, workingDir?: string) {
@@ -522,7 +524,16 @@ ${CYAN}  Shortcuts:${RESET}
     if (this.interrupted) return;
 
     if (response.type === "text") {
-      this.printModelMessage(response.text);
+      const isPlaceholder = response.text.startsWith("(") && response.text.endsWith(")");
+
+      // If model returned a placeholder empty response but we did work, show a summary instead
+      if (isPlaceholder && this.completedActions.length > 0) {
+        const summary = this.completedActions.slice(-8).join("\n  - ");
+        this.printModelMessage(`Done. Here's what I did:\n  - ${summary}`);
+      } else {
+        this.printModelMessage(response.text);
+      }
+
       this.lastResponseHadText = true;
       this.session.append({ role: "model", content: response.text });
       return;
@@ -551,13 +562,23 @@ ${CYAN}  Shortcuts:${RESET}
         content: JSON.stringify({ name: call.name, args: call.args }),
       });
 
+      // Detect task boundary: new page = new task group
+      this.detectTaskBoundary(call.name, call.args);
+
       // Show friendly tool description
       const friendlyDesc = this.formatToolCall(call.name, call.args);
       this.spinner.start(friendlyDesc);
       const result = await executeTool(this.chrome, call.name, call.args);
       this.spinner.stop();
 
-      // Show friendly result
+      // Update task label from navigation results
+      if (call.name === "chrome_navigate" || call.name === "chrome_click") {
+        const titleMatch = result.match?.(/title: (.+?)(?:,|\})/);
+        if (titleMatch) this.currentTaskLabel = titleMatch[1].slice(0, 50);
+      }
+
+      // Show friendly result (skip noisy intermediate reads/scrolls)
+      this.taskStepCount++;
       const friendlyResult = this.formatToolResult(call.name, call.args, result);
       console.log(friendlyResult);
 
@@ -687,6 +708,34 @@ ${CYAN}  Shortcuts:${RESET}
         role: "system",
         content: `Tool result error: ${err.message}`,
       });
+    }
+  }
+
+  // ─── Task grouping ─────────────────────────────────────────────────────
+
+  private detectTaskBoundary(toolName: string, args: Record<string, any>): void {
+    // A new "task" starts when we navigate to a different page or click a post/link
+    let newLabel = "";
+
+    if (toolName === "chrome_navigate" && args.url) {
+      const url = (args.url as string).replace(/^https?:\/\//, "").slice(0, 60);
+      newLabel = url;
+    } else if (toolName === "chrome_click" && args.target) {
+      const target = (args.target as string).slice(0, 60);
+      // Only treat clicks on post titles / links as new tasks (not "save", "comment", etc.)
+      if (target.length > 20) {
+        newLabel = `"${target}"`;
+      }
+    }
+
+    if (newLabel && newLabel !== this.currentTaskLabel) {
+      // Close previous task group if there was one
+      if (this.currentTaskLabel && this.taskStepCount > 0) {
+        console.log(`${CYAN}╰─${RESET}\n`);
+      }
+      this.currentTaskLabel = newLabel;
+      this.taskStepCount = 0;
+      console.log(`${CYAN}╭─${RESET} ${WHITE}${newLabel}${RESET}`);
     }
   }
 
