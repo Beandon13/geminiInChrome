@@ -20,12 +20,18 @@ const GREEN = "\x1b[32m";
 const CYAN = "\x1b[36m";
 const YELLOW = "\x1b[33m";
 const RED = "\x1b[31m";
+const BLUE = "\x1b[34m";
+const MAGENTA = "\x1b[35m";
+const WHITE = "\x1b[37m";
 const BOLD = "\x1b[1m";
 const DIM = "\x1b[2m";
+const ITALIC = "\x1b[3m";
 const RESET = "\x1b[0m";
 const CLEAR_LINE = "\x1b[2K\r";
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
+const BG_CYAN = "\x1b[46m";
+const BG_DARK = "\x1b[48;5;236m";
 
 // ─── Spinner ─────────────────────────────────────────────────────────────────
 
@@ -43,7 +49,7 @@ class Spinner {
     this.interval = setInterval(() => {
       const spinner = SPINNER_FRAMES[this.frame % SPINNER_FRAMES.length];
       process.stdout.write(
-        `${CLEAR_LINE}${CYAN}${spinner}${RESET} ${DIM}${this.message}${RESET}`
+        `${CLEAR_LINE}${CYAN}│${RESET} ${spinner} ${DIM}${this.message}${RESET}`
       );
       this.frame++;
     }, 80);
@@ -169,14 +175,14 @@ export class CLI {
 
     if (resumed && this.session.allEntries().length > 0) {
       console.log(
-        `${GREEN}  ↻ Resumed session ${DIM}${this.session.id}${RESET}`
+        `  ${GREEN}↻${RESET} ${WHITE}Resumed session${RESET} ${DIM}${this.session.id}${RESET}`
       );
       console.log(
-        `${GRAY}    ${this.session.allEntries().length} entries loaded${RESET}\n`
+        `    ${DIM}${this.session.allEntries().length} entries loaded${RESET}`
       );
     } else {
       console.log(
-        `${GREEN}  ✦ New session ${DIM}${this.session.id}${RESET}\n`
+        `  ${GREEN}✦${RESET} ${WHITE}New session${RESET} ${DIM}${this.session.id}${RESET}`
       );
       this.session.append({
         role: "system",
@@ -188,17 +194,19 @@ export class CLI {
     const memoryContext = Memory.formatForContext();
     if (memoryContext) {
       const memCount = Memory.loadRecent().length;
-      console.log(`${GRAY}  ${memCount} memories loaded from previous sessions${RESET}`);
+      console.log(`    ${DIM}${memCount} memories loaded${RESET}`);
       this.session.append({
         role: "system",
         content: memoryContext,
       });
     }
 
-    console.log(`${GRAY}  cwd: ${getWorkingDir()}${RESET}`);
+    const cwd = getWorkingDir().replace(process.env.HOME || "/Users", "~");
+    console.log(`    ${DIM}cwd: ${cwd}${RESET}`);
     console.log(
-      `${GRAY}  Ctrl+C to interrupt • /help for commands • /exit to quit${RESET}\n`
+      `\n  ${DIM}Ctrl+C to interrupt ${GRAY}•${DIM} /help for commands ${GRAY}•${DIM} /exit to quit${RESET}\n`
     );
+    console.log(`${GRAY}${"─".repeat(60)}${RESET}\n`);
 
     this.initChat();
     this.prompt();
@@ -214,6 +222,7 @@ export class CLI {
 ${BOLD}${CYAN}  ╭─────────────────────────────────────╮
   │   Gemini in Chrome                  │
   │   ${RESET}${DIM}AI Coding Agent + Browser Control${RESET}${BOLD}${CYAN}  │
+  │   ${RESET}${DIM}${ITALIC}made by Beandon${RESET}${BOLD}${CYAN}                    │
   ╰─────────────────────────────────────╯${RESET}
 `);
   }
@@ -221,12 +230,8 @@ ${BOLD}${CYAN}  ╭────────────────────�
   private prompt(): void {
     this.processing = false;
     this.interrupted = false;
-    const cwd = getWorkingDir().replace(
-      process.env.HOME || "/Users",
-      "~"
-    );
     this.rl.question(
-      `${BOLD}${CYAN}${cwd}${RESET} ${BOLD}›${RESET} `,
+      `${BOLD}${BLUE}> ${RESET}`,
       (input) => {
         this.handleInput(input.trim());
       }
@@ -505,14 +510,14 @@ ${CYAN}  Shortcuts:${RESET}
     if (this.interrupted) return;
 
     if (response.type === "text") {
-      console.log(`\n${response.text}\n`);
+      this.printModelMessage(response.text);
       this.session.append({ role: "model", content: response.text });
       return;
     }
 
     // Handle function calls
     if (response.text) {
-      console.log(`\n${response.text}`);
+      this.printModelMessage(response.text);
     }
 
     const functionResults: Array<{
@@ -672,6 +677,23 @@ ${CYAN}  Shortcuts:${RESET}
     }
   }
 
+  // ─── Chat-style output ─────────────────────────────────────────────────
+
+  private printModelMessage(text: string): void {
+    console.log(`\n${BOLD}${CYAN}Gemini${RESET}`);
+
+    // Indent and style each line of the response
+    const lines = text.split("\n");
+    for (const line of lines) {
+      if (!line.trim()) {
+        console.log("");
+      } else {
+        console.log(`${WHITE}${line}${RESET}`);
+      }
+    }
+    console.log("");
+  }
+
   // ─── Friendly output formatting ─────────────────────────────────────────
 
   private formatToolCall(name: string, args: Record<string, any>): string {
@@ -722,55 +744,56 @@ ${CYAN}  Shortcuts:${RESET}
     args: Record<string, any>,
     result: string
   ): string {
+    const BAR = `${CYAN}│${RESET}`;
     const isError = result.startsWith("ERROR");
 
     if (isError) {
-      return `${RED}  ✗ ${result.slice(0, 120)}${RESET}`;
+      return `${BAR} ${RED}✗ ${result.slice(0, 120)}${RESET}`;
     }
 
     switch (name) {
       case "chrome_list_tabs": {
         const tabCount = (result.match(/\[\d+\]/g) || []).length;
-        return `${GREEN}  ✓ Found ${tabCount} tab(s)${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}Found ${tabCount} tab(s)${RESET}`;
       }
       case "chrome_attach":
-        return `${GREEN}  ✓ ${result}${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}${result}${RESET}`;
       case "chrome_navigate": {
         const urlMatch = result.match(/Navigated to: (.+)/);
         const url = urlMatch ? urlMatch[1].slice(0, 70) : args.url;
-        return `${GREEN}  ✓ Opened ${url}${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}Opened ${url}${RESET}`;
       }
       case "chrome_get_page_text": {
         const titleMatch = result.match(/=== Page: (.+?) ===/);
         const title = titleMatch ? titleMatch[1].slice(0, 60) : "page";
-        return `${GRAY}  ✓ Read page: ${title}${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}Read page: ${title}${RESET}`;
       }
       case "chrome_screenshot":
-        return `${GREEN}  ✓ ${result}${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}${result}${RESET}`;
       case "chrome_click": {
         const clickMatch = result.match(/Clicked: \w+ "(.+?)"/);
         const what = clickMatch ? clickMatch[1].slice(0, 50) : args.target;
-        return `${GREEN}  ✓ Clicked "${what}"${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}Clicked "${what}"${RESET}`;
       }
       case "chrome_type": {
         const snippet = (args.text || "").slice(0, 50);
-        return `${GREEN}  ✓ Typed: "${snippet}..."${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}Typed: "${snippet}..."${RESET}`;
       }
       case "chrome_scroll":
-        return `${GRAY}  ✓ Scrolled ${args.direction || "down"}${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}Scrolled ${args.direction || "down"}${RESET}`;
       case "chrome_press_key":
-        return `${GRAY}  ✓ Pressed ${args.key}${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}Pressed ${args.key}${RESET}`;
       case "chrome_wait":
-        return `${GRAY}  ✓ Waited ${args.ms}ms${RESET}`;
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}Waited ${args.ms}ms${RESET}`;
       case "run_command": {
         const truncated =
           result.length > 200 ? result.slice(0, 200) + "…" : result;
-        return `${GRAY}  ↳ ${truncated}${RESET}`;
+        return `${BAR} ${DIM}↳ ${truncated}${RESET}`;
       }
       default: {
         const truncated =
           result.length > 200 ? result.slice(0, 200) + "…" : result;
-        return `${GRAY}  ↳ ${truncated}${RESET}`;
+        return `${BAR} ${DIM}↳ ${truncated}${RESET}`;
       }
     }
   }
