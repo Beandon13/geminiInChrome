@@ -15,6 +15,15 @@ import { execSync } from "child_process";
 
 export const chromeToolDeclarations: FunctionDeclaration[] = [
   {
+    name: "chrome_launch",
+    description:
+      "Launch Chrome with remote debugging enabled (uses the user's existing profile). If Chrome is already running, reports the existing tabs. Always call this before chrome_list_tabs if Chrome is not running.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {},
+    },
+  },
+  {
     name: "chrome_list_tabs",
     description:
       "List all open tabs in the Chrome browser. Returns tab index, title, and URL for each.",
@@ -505,6 +514,14 @@ function runCommandTool(command: string, cwd?: string): string {
   }
 }
 
+// ─── Screenshot display callback ────────────────────────────────────────────
+
+let _onScreenshot: ((base64: string) => void) | null = null;
+
+export function onScreenshot(cb: (base64: string) => void): void {
+  _onScreenshot = cb;
+}
+
 // ─── Unified tool executor ───────────────────────────────────────────────────
 
 export async function executeTool(
@@ -515,6 +532,8 @@ export async function executeTool(
   try {
     // Chrome tools
     switch (functionName) {
+      case "chrome_launch":
+        return await chrome.launchChrome();
       case "chrome_list_tabs": {
         const tabs = await chrome.listTabs();
         if (tabs.length === 0) return "No tabs found.";
@@ -533,7 +552,11 @@ export async function executeTool(
           args.filename ||
           `screenshot-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
         const filePath = resolve("./screenshots", filename);
-        return await chrome.screenshot(filePath);
+        const result = await chrome.screenshot(filePath);
+        if (_onScreenshot && result.base64) {
+          _onScreenshot(result.base64);
+        }
+        return result.message;
       }
       case "chrome_click":
         return await chrome.click(args.target as string);

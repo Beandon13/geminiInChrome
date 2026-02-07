@@ -9,6 +9,7 @@ import {
   executeTool,
   setWorkingDir,
   getWorkingDir,
+  onScreenshot,
 } from "./tools.js";
 import { Memory } from "./memory.js";
 import type { ChatSession, Content } from "@google/generative-ai";
@@ -118,6 +119,7 @@ export class CLI {
   private toolCallCount = 0;
   private lastUserMessage = "";
   private completedActions: string[] = [];
+  private lastResponseHadText = false;
   private static readonly COMPACT_THRESHOLD = 12;
 
   constructor(sessionId?: string, workingDir?: string) {
@@ -128,6 +130,9 @@ export class CLI {
     if (workingDir) {
       setWorkingDir(workingDir);
     }
+
+    // Register inline screenshot display
+    onScreenshot((base64) => this.displayInlineImage(base64));
 
     this.rl = readline.createInterface({
       input: process.stdin,
@@ -420,6 +425,7 @@ ${CYAN}  Shortcuts:${RESET}
     this.toolCallCount = 0;
     this.lastUserMessage = userMessage;
     this.completedActions = [];
+    this.lastResponseHadText = false;
 
     const contextPrefix = `[Working directory: ${getWorkingDir()}]\n\n`;
     const messageToSend = contextPrefix + userMessage;
@@ -457,6 +463,12 @@ ${CYAN}  Shortcuts:${RESET}
 
       // Process response (handles tool call loops)
       await this.processResponse(response);
+
+      // If the model finished without a text message, show a summary
+      if (!this.lastResponseHadText && !this.interrupted && this.completedActions.length > 0) {
+        const summary = this.completedActions.slice(-5).join("\n  - ");
+        this.printModelMessage(`Done. Here's what I did:\n  - ${summary}`);
+      }
     } catch (err: any) {
       this.spinner.stop();
 
@@ -511,6 +523,7 @@ ${CYAN}  Shortcuts:${RESET}
 
     if (response.type === "text") {
       this.printModelMessage(response.text);
+      this.lastResponseHadText = true;
       this.session.append({ role: "model", content: response.text });
       return;
     }
@@ -677,6 +690,17 @@ ${CYAN}  Shortcuts:${RESET}
     }
   }
 
+  // ─── Inline image display (iTerm2 / Kitty / WezTerm) ───────────────────
+
+  private displayInlineImage(base64: string): void {
+    // iTerm2 inline image protocol (also supported by WezTerm, Hyper, etc.)
+    // OSC 1337 ; File=[args] : base64data ST
+    const data = base64;
+    process.stdout.write(
+      `\x1b]1337;File=inline=1;width=80;preserveAspectRatio=1:${data}\x07\n`
+    );
+  }
+
   // ─── Chat-style output ─────────────────────────────────────────────────
 
   private printModelMessage(text: string): void {
@@ -698,6 +722,8 @@ ${CYAN}  Shortcuts:${RESET}
 
   private formatToolCall(name: string, args: Record<string, any>): string {
     switch (name) {
+      case "chrome_launch":
+        return "Launching Chrome...";
       case "chrome_list_tabs":
         return "Listing browser tabs...";
       case "chrome_attach":
@@ -752,6 +778,8 @@ ${CYAN}  Shortcuts:${RESET}
     }
 
     switch (name) {
+      case "chrome_launch":
+        return `${BAR} ${GREEN}✓${RESET} ${DIM}${result.slice(0, 100)}${RESET}`;
       case "chrome_list_tabs": {
         const tabCount = (result.match(/\[\d+\]/g) || []).length;
         return `${BAR} ${GREEN}✓${RESET} ${DIM}Found ${tabCount} tab(s)${RESET}`;

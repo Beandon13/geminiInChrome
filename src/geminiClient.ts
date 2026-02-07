@@ -128,10 +128,17 @@ export class GeminiClient {
     const candidates = response.candidates;
 
     if (!candidates || candidates.length === 0) {
+      // Check for blocked/filtered responses
+      const blockReason = response.promptFeedback?.blockReason;
+      if (blockReason) {
+        return { type: "text", text: `(Response blocked: ${blockReason})` };
+      }
       return { type: "text", text: "(No response from model)" };
     }
 
-    const parts = candidates[0].content?.parts || [];
+    const candidate = candidates[0];
+    const finishReason = candidate.finishReason;
+    const parts = candidate.content?.parts || [];
     const functionCalls: Array<{ name: string; args: Record<string, any> }> = [];
     const textParts: string[] = [];
 
@@ -155,9 +162,20 @@ export class GeminiClient {
       };
     }
 
+    // Handle cases where the model stopped without saying anything
+    if (textParts.length === 0 || !textParts.join("").trim()) {
+      if (finishReason === "SAFETY") {
+        return { type: "text", text: "(Response filtered by safety settings)" };
+      }
+      if (finishReason === "MAX_TOKENS") {
+        return { type: "text", text: "(Response cut off — token limit reached)" };
+      }
+      return { type: "text", text: "(Model returned empty response)" };
+    }
+
     return {
       type: "text",
-      text: textParts.join("\n") || "(Empty response)",
+      text: textParts.join("\n"),
     };
   }
 }

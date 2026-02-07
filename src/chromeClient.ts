@@ -1,6 +1,7 @@
 import CDP from "chrome-remote-interface";
 import { writeFileSync, mkdirSync } from "fs";
 import { dirname } from "path";
+import { spawn } from "child_process";
 import { config } from "./config.js";
 
 interface TabInfo {
@@ -13,6 +14,66 @@ interface TabInfo {
 export class ChromeClient {
   private client: CDP.Client | null = null;
   private currentTab: TabInfo | null = null;
+
+  /** Launch Chrome with remote debugging, using the user's default profile */
+  async launchChrome(): Promise<string> {
+    // Check if Chrome is already running with debugging
+    try {
+      const tabs = await CDP.List({ host: config.cdpHost, port: config.cdpPort });
+      if (tabs.length > 0) {
+        return `Chrome is already running with ${tabs.filter((t: any) => t.type === "page").length} tab(s).`;
+      }
+    } catch {
+      // Not running — launch it
+    }
+
+    const chromePaths = [
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium-browser",
+      "/usr/bin/chromium",
+    ];
+
+    let chromePath = "";
+    for (const p of chromePaths) {
+      try {
+        const { existsSync } = await import("fs");
+        if (existsSync(p)) {
+          chromePath = p;
+          break;
+        }
+      } catch {}
+    }
+
+    if (!chromePath) {
+      return "ERROR: Could not find Chrome. Please launch it manually with --remote-debugging-port=" + config.cdpPort;
+    }
+
+    // Spawn detached with stdio ignored so it doesn't pollute the terminal
+    const child = spawn(chromePath, [
+      `--remote-debugging-port=${config.cdpPort}`,
+    ], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+
+    // Wait for Chrome to be ready
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        const tabs = await CDP.List({ host: config.cdpHost, port: config.cdpPort });
+        if (tabs.length > 0) {
+          return `Chrome launched with ${tabs.filter((t: any) => t.type === "page").length} tab(s) ready.`;
+        }
+      } catch {
+        // Not ready yet
+      }
+    }
+
+    return "Chrome launched but could not verify connection. Try /tabs to check.";
+  }
 
   /** List all available tabs from the Chrome instance */
   async listTabs(): Promise<TabInfo[]> {
@@ -284,13 +345,13 @@ export class ChromeClient {
     return result.result.value as string || "Could not extract page text.";
   }
 
-  /** Take a screenshot and save to disk */
-  async screenshot(filePath: string): Promise<string> {
+  /** Take a screenshot and save to disk. Returns { message, base64 } */
+  async screenshot(filePath: string): Promise<{ message: string; base64: string }> {
     const client = await this.ensureConnected();
     const { data } = await client.Page.captureScreenshot({ format: "png" });
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, Buffer.from(data, "base64"));
-    return `Screenshot saved to: ${filePath}`;
+    return { message: `Screenshot saved to: ${filePath}`, base64: data };
   }
 
   /** Click an element by CSS selector or by visible text */
