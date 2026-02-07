@@ -1,0 +1,23 @@
+{
+  "name": "gemini-in-chrome",
+  "version": "1.0.0",
+  "description": "Gemini-powered CLI agent with Chrome browser automation via DevTools Protocol",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "gemini": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "chrome-remote-interface": "^0.33.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
